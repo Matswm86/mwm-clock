@@ -26,7 +26,7 @@ It wakes you up on time and gets out of the way.
 
 ## 📲 Download
 
-**[⬇ Latest APK](https://github.com/Matswm86/mwm-clock/releases/download/latest/mwm-clock-0000000.apk)**
+**[⬇ Latest APK](https://github.com/Matswm86/mwm-clock/releases/download/latest/mwm-clock-0b9a346.apk)**
 &nbsp;·&nbsp; [all builds](https://github.com/Matswm86/mwm-clock/releases)
 
 Open the link on your phone, tap the file, and allow "install from this source"
