@@ -1,0 +1,224 @@
+name: build-android
+
+# Builds the MWM Clock debug APK, attaches it to the rolling "latest"
+# pre-release, points the README download link at it, then boots the APK on an
+# emulator, drives the alarm, timer and stopwatch, and refreshes the README
+# screenshot.
+#
+# Nothing is built on a workstation. CI is the only place an APK is produced.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # The default list still names the long-removed 'tools' package, and
+          # sdkmanager now fails on it. The packages needed are installed below.
+          packages: ""
+
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Name the APK after this commit
+        run: |
+          set -euo pipefail
+          # A fixed filename on the rolling "latest" release is cached hard by
+          # browsers and by Android, so phones keep installing an old build. The
+          # commit SHA in the filename makes every build its own URL.
+          APK_FILE="mwm-clock-${GITHUB_SHA:0:7}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK_FILE"
+          echo "APK_FILE=$APK_FILE" >> "$GITHUB_ENV"
+          ls -lh "$APK_FILE"
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mwm-clock-debug-apk
+          path: ${{ env.APK_FILE }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Update rolling "latest" pre-release (main pushes)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build (rolling)
+          prerelease: true
+          body: |
+            Auto-built APK from the latest `main` commit (${{ github.sha }}).
+
+            **Install on a phone:** download `${{ env.APK_FILE }}`, open it, and
+            allow "install from this source" when Android asks. Android 8.0 or
+            newer (minSdk 26). The filename carries the commit id so your browser
+            cannot serve you a cached older build.
+
+            Debug-signed. If you are reinstalling over a build with a different
+            signature, uninstall the old one first.
+          files: ${{ env.APK_FILE }}
+          fail_on_unmatched_files: true
+
+      # The filename changes every build, so a link typed into README.md by hand
+      # is stale as soon as the next build lands. This step rewrites it and
+      # pushes with a skip-ci marker so the bump does not trigger another build.
+      - name: Point README at the APK this build produced (main pushes)
+        if: github.ref == 'refs/heads/main'
+        env:
+          APK_FILE: ${{ env.APK_FILE }}
+        run: |
+          set -euo pipefail
+          git checkout -- . 2>/dev/null || true
+          git fetch --depth=1 origin main
+          git checkout -B _readme_bump FETCH_HEAD
+          python3 - "$APK_FILE" <<'EOF'
+          import re
+          import sys
+
+          apk = sys.argv[1]
+          text = open("README.md", encoding="utf-8").read()
+          out = re.sub(r"mwm-clock-[0-9a-f]{7,40}\.apk", apk, text)
+          open("README.md", "w", encoding="utf-8").write(out)
+          print("README unchanged" if out == text else f"README -> {apk}")
+          EOF
+          if git diff --quiet -- README.md; then
+            echo "README already points at ${APK_FILE}"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "README: download link -> ${APK_FILE} [skip ci]"
+          # Losing the race is harmless: the next build corrects the link.
+          git push origin _readme_bump:main \
+            || echo "push rejected (main moved), the next build will correct the README"
+
+      - name: Create tagged release (vX.Y.Z tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body: |
+            MWM Clock ${{ github.ref_name }}. Sideload only, debug-signed.
+          files: ${{ env.APK_FILE }}
+          fail_on_unmatched_files: true
+
+  # A green compile says nothing about whether an alarm gets armed or a timer
+  # rings. This job opens the app on an emulator, saves an alarm and checks
+  # AlarmManager holds it, lets a 5-second timer ring, and laps a stopwatch.
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Drive the app on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          # Not aosp_atd: the test-device images turn hardware rendering off,
+          # so every screencap from them is a black frame.
+          target: default
+          arch: x86_64
+          profile: pixel_5
+          ram-size: 3072M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tools/smoke.sh
+
+      - name: Upload logcat, view dumps and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mwm-clock-smoke
+          path: smoke/
+          if-no-files-found: warn
+
+      # The README image is the real app on the CI emulator. The clock in it
+      # differs every run, so committing it on every build would add a PNG to
+      # history each time: it is written when missing, or when the commit
+      # message asks with [screenshot]. A headless emulator sometimes hands back
+      # a black frame; that compresses to a few KB, so the size check skips it.
+      - name: Refresh the README screenshot (main pushes)
+        if: github.ref == 'refs/heads/main'
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          SHOT=smoke/clock.png
+          if [ -f docs/screenshot.png ] && [[ "$COMMIT_MESSAGE" != *"[screenshot]"* ]]; then
+            echo "docs/screenshot.png exists and the commit did not ask for a new one"; exit 0
+          fi
+          SIZE=$(stat -c %s "$SHOT" 2>/dev/null || echo 0)
+          if [ "$SIZE" -lt 40000 ]; then
+            echo "::warning::screenshot is ${SIZE} bytes, treating it as a blank frame and keeping the old one"
+            exit 0
+          fi
+          cp "$SHOT" /tmp/screenshot.png
+          git checkout -- . 2>/dev/null || true
+          git fetch --depth=1 origin main
+          git checkout -B _shot_bump FETCH_HEAD
+          mkdir -p docs
+          cp /tmp/screenshot.png docs/screenshot.png
+          git add docs/screenshot.png
+          if git diff --cached --quiet; then
+            echo "screenshot unchanged"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qm "docs: refresh README screenshot from the CI emulator [skip ci]"
+          git push origin _shot_bump:main \
+            || echo "push rejected (main moved), the next build will refresh the screenshot"
