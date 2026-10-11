@@ -5,25 +5,6 @@
 An alarm clock, timers and stopwatches for Android, on one plain screen.
 It wakes you up on time and gets out of the way.
 
-- **No ads, no account, no tracking.** The app does not ask for the internet
-  permission, so it has no way to phone anywhere.
-- **Alarms that ring.** Each alarm is armed with Android's alarm-clock call,
-  the one that battery saving never delays, and is re-armed after a reboot,
-  an app update or a time zone change. It rings over the lock screen.
-- **Wakes you gently or firmly.** Per alarm: repeat days, label, sound,
-  vibration, a volume that rises over 30 seconds to 3 minutes, snooze length,
-  a limit on snoozes, and an optional math challenge: solve one sum, or three
-  hard ones, before it goes quiet. Skip the next occurrence of a repeating
-  alarm without turning it off.
-- **Several timers at once.** Type a time on the keypad or tap a preset, name
-  it, and start as many as you need. Each one counts down in the notification
-  shade, rings when it is done, counts the overtime, and takes +1 MIN.
-- **Several stopwatches at once**, each with laps, fastest and slowest lap
-  marked, START ALL / STOP ALL, and names you can change. They keep their time
-  when the app is closed and across a reboot.
-- If an alarm volume is at zero, the alarm lifts it for the ring and puts it
-  back afterwards. An alarm nobody answers goes quiet after 10 minutes.
-
 ## 📲 Download
 
 **[⬇ Latest APK](https://github.com/Matswm86/mwm-clock/releases/download/latest/mwm-clock-0b9a346.apk)**
@@ -38,6 +19,27 @@ the releases page.
 Debug-signed. Reinstalling over a build with a different signature means
 uninstalling the old one first.
 
+## What it does
+
+- **No ads, no account, no tracking.** The app does not ask for the internet
+  permission, so it has no way to phone anywhere.
+- **Alarms that ring.** Each alarm is armed with Android's alarm-clock call,
+  the one that battery saving never delays, and is re-armed after a reboot,
+  an app update or a time zone change. It rings over the lock screen.
+- **Wakes you gently or firmly.** Per alarm: repeat days, label, sound,
+  vibration, a volume that rises over 30 seconds to 3 minutes, snooze length,
+  a limit on snoozes, and an optional math challenge: solve one sum, or three
+  hard ones, before you can dismiss it. Skip the next occurrence of a repeating
+  alarm without turning it off.
+- **Several timers at once.** Type a time on the keypad or tap a preset, name
+  it, and start as many as you need. Each one counts down in the notification
+  shade, rings when it is done, counts the overtime, and takes +1 MIN.
+- **Several stopwatches at once**, each with laps, fastest and slowest lap
+  marked, START ALL / STOP ALL, and names you can change. They keep their time
+  when the app is closed and across a reboot.
+- If an alarm volume is at zero, the alarm lifts it for the ring and puts it
+  back afterwards. An alarm nobody answers goes quiet after 10 minutes.
+
 ## Using it
 
 | On screen | What it means |
@@ -46,23 +48,41 @@ uninstalling the old one first.
 | `M T W T F S S` under an alarm | Its repeat days, lit in amber |
 | ON / OFF | Turns that alarm on or off; tap the alarm itself to edit it |
 | `SKIPPING MON 12 OCT` | You skipped that one occurrence; it rings as usual after |
-| `MATH 3 HARD` | Turning this alarm off takes three hard sums |
+| `MATH 3 HARD` | Dismissing this alarm takes three hard sums |
 | `-0:12` in amber | The timer finished 12 seconds ago |
 | Sage and amber laps | The fastest and the slowest lap |
 | Amber text under the header | A phone setting that would stop alarms working; tap it to fix |
 
 **Permissions.** Notifications (to show the ring screen and running timers),
 exact alarms (granted to alarm clocks automatically on Android 13 and newer),
-full-screen alarms, start at boot, and vibration. None of them reach the
-network. On some phones the maker's battery saver can still kill alarm apps:
-if an alarm ever fails to ring, set battery use for MWM Clock to
-"Unrestricted".
+full-screen alarms, start at boot, vibration, a foreground service to play the
+ring sound, and a wake lock. None of them reach the network. On some phones the
+maker's battery saver can still kill alarm apps: if an alarm ever fails to
+ring, set battery use for MWM Clock to "Unrestricted".
 
 ## What it deliberately does not do
 
 - No world clock, bedtime tracking, weather or news on the alarm screen.
 - No network access of any kind.
 - No widgets, themes or settings screens.
+
+## How it works
+
+MWM Clock is written in Kotlin with a Jetpack Compose interface, and uses no
+libraries beyond AndroidX and kotlinx.coroutines. Alarms, timers and stopwatches
+are saved as JSON in the phone's device-protected storage, so an alarm set
+before a reboot still rings before the phone is unlocked. Android's
+AlarmManager only ever holds two entries, the soonest alarm and the soonest
+timer; when one fires, everything that is due rings through a foreground
+service that plays the sound on the alarm stream, and the next soonest is
+armed. Timers and stopwatches count in the phone's elapsed-time clock, so
+changing the time cannot stretch them, and after a reboot they are shifted so
+they keep their time.
+
+## Status
+
+Version 0.1.0, sideload only. Every build is debug-signed; there is no
+release-signed build.
 
 ## Building
 
@@ -72,9 +92,7 @@ alarm and checks Android's AlarmManager holds it, lets a 5-second timer ring
 until the ring screen appears and stops it, and laps a stopwatch. The README
 screenshot comes from that emulator run.
 
-Kotlin and Jetpack Compose, no third-party libraries beyond AndroidX and
-kotlinx.coroutines. The display font is JetBrains Mono (SIL Open Font License,
-see `licenses/`).
+The display font is JetBrains Mono (SIL Open Font License, see `licenses/`).
 
 ## License
 
